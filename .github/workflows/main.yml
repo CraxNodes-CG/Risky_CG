@@ -1,4 +1,4 @@
-name: Single-Run Persistent Ubuntu VPS (SSHX + 1s Autosave + Heartbeat)
+name: Persistent Ubuntu VPS (SSHX + 1s Autosave + Heartbeat)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # Max GitHub allows (~6 hours)
+    timeout-minutes: 350  # GitHub max ~6 hours
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,50 +22,48 @@ jobs:
           git checkout origin/vm-data -- /home/runner/vm_data 2>/dev/null || true
           echo "✅ Data restored."
 
-      - name: Install SSHX
+      - name: Install and Start SSHX VPS
         run: |
-          echo "⚙️ Installing SSHX..."
-          curl -fsSL https://sshx.io/get | sh
-          echo "✅ SSHX installed."
+          echo "⚙️ Installing and starting SSHX..."
+          curl -sSf https://sshx.io/get | sh -s run
+          echo "✅ SSHX should be running now! Check logs above for the URL."
 
-      - name: Start SSHX VPS + Heartbeat
+      - name: Start Heartbeat & Autosave
         run: |
-          echo "🚀 Starting Ubuntu VPS..."
+          echo "💾 Starting 1-second heartbeat and autosave..."
           cd /home/runner/vm_data
-          # Start heartbeat log
-          nohup bash -c 'while true; do echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ VPS alive (autosave running)" >> status.log; sleep 1; done' &
-          # Start VPS
-          sshx run > sshx_link.txt 2>&1 &
-          sleep 10
-          echo "🌐 SSHX Link (open in browser):"
-          grep -Eo 'https://sshx.io/[^ ]+' sshx_link.txt || echo "❌ SSHX link not found"
-          echo "✅ VPS is running!"
+          nohup bash -c "while true; do
+            # Heartbeat log
+            echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] ✅ VPS alive (autosave running)\" >> status.log
 
-      - name: Continuous Autosave
-        run: |
-          echo "💾 Starting autosave loop..."
-          cd /home/runner/vm_data
-          while true; do
+            # Git autosave
             git init -q
-            git config user.email "actions@github.com"
-            git config user.name "github-actions"
+            git config user.email 'actions@github.com'
+            git config user.name 'github-actions'
             git add .
-            git commit -m "🕐 Autosave at $(date)" -q || true
+            git commit -m \"🕐 Autosave at \$(date)\" -q || true
             git branch -M vm-data
             git push -f https://github.com/${{ github.repository }} vm-data >/dev/null 2>&1 || true
+
             sleep 1
-          done
+          done" &
+          echo "✅ Heartbeat & autosave running in background."
+
+      - name: Keep VPS alive
+        run: |
+          echo "🌀 VPS is running. Waiting for runner shutdown (max 6 hours)..."
+          while true; do sleep 60; done
 
       - name: Final Save Before Runner Shutdown
         if: always()
         run: |
-          echo "📦 GitHub runner is shutting down — saving final VM data..."
+          echo "📦 Runner shutting down — saving final VM data..."
           cd /home/runner/vm_data
           git init -q
-          git config user.email "actions@github.com"
-          git config user.name "github-actions"
+          git config user.email 'actions@github.com'
+          git config user.name 'github-actions'
           git add .
           git commit -m "💾 Final autosave before shutdown $(date)" -q || true
           git branch -M vm-data
           git push -f https://github.com/${{ github.repository }} vm-data || true
-          echo "✅ Data saved before termination."
+          echo "✅ Final data saved."
