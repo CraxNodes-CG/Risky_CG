@@ -1,0 +1,99 @@
+name: Auto-Restarting Persistent Ubuntu VPS (SSHX + 1s Autosave + Heartbeat)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  vps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore previous VM data
+        run: |
+          echo "🔁 Restoring /home/runner/vm_data from vm-data branch..."
+          mkdir -p /home/runner/vm_data
+          git fetch origin vm-data || echo "No remote vm-data branch yet."
+          git checkout vm-data -- . || echo "Fresh start: no previous data found."
+          echo "✅ Data restored."
+
+      - name: Install SSHX
+        run: |
+          echo "⚙️ Installing SSHX..."
+          curl -L https://github.com/sshxio/sshx/releases/latest/download/sshx-x86_64-unknown-linux-musl.tar.gz -o sshx.tar.gz
+          tar -xzf sshx.tar.gz
+          sudo mv sshx /usr/local/bin/sshx
+          chmod +x /usr/local/bin/sshx
+          sshx --version
+          echo "✅ SSHX installed at /usr/local/bin/sshx"
+
+      - name: Start SSHX VPS
+        run: |
+          echo "🚀 Starting Ubuntu VPS..."
+          cd /home/runner/vm_data
+          nohup /usr/local/bin/sshx run -p 22 -t > /tmp/sshx.log 2>&1 &
+          sleep 5
+          echo "🌐 SSHX Link (open in browser):"
+          cat /tmp/sshx.log | grep -Eo 'https://sshx.io/[a-zA-Z0-9]+'
+
+      - name: Start 1-Second AutoSave + Heartbeat
+        run: |
+          echo "💾 Launching autosave + heartbeat..."
+          cat > /tmp/autosave.sh <<'EOF'
+          cd /home/runner/vm_data
+          git init
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}"
+
+          echo "🩺 Starting heartbeat and autosave monitor..."
+          while true; do
+            # Heartbeat update
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Autosave tick — VPS alive" >> /home/runner/vm_data/status.log
+
+            # Git autosave
+            git add .
+            git commit -m "Auto-save: $(date '+%Y-%m-%d %H:%M:%S')" >/dev/null 2>&1 || true
+            git push -f origin HEAD:vm-data >/dev/null 2>&1 || true
+
+            sleep 1
+          done
+          EOF
+          bash /tmp/autosave.sh &
+          echo "✅ Autosave & heartbeat are running every 1s."
+
+      - name: Keep VPS alive
+        run: |
+          echo "🌀 VPS running. Press Ctrl+C to stop (or wait for timeout)."
+          while true; do sleep 60; done
+
+      - name: Backup VM data before exit
+        if: always()
+        run: |
+          echo "📦 Saving VM data before exit..."
+          cd /home/runner/vm_data
+          git init
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}"
+          git add .
+          git commit -m "Final backup $(date)" || true
+          git push -f origin HEAD:vm-data || true
+          echo "✅ Data backed up."
+
+      - name: 🔁 Auto-Restart Workflow on Exit
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "♻️ Re-triggering workflow for auto-restart..."
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/persistent-vps.yml/dispatches \
+            -d '{"ref":"${{ github.ref_name }}"}'
+          echo "✅ Restart signal sent successfully."
