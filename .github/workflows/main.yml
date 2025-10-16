@@ -3,12 +3,12 @@ name: Persistent Ubuntu VPS (SSHX + 1s Autosave + Heartbeat + Cron Restart)
 on:
   schedule:
     - cron: "30 5 * * *"  # every day at 05:30 UTC (adjust timezone)
-  workflow_dispatch:       # manual trigger
+  workflow_dispatch:       # allow manual start
 
 jobs:
   vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 360   # 6 hours, slightly above sleep duration
+    timeout-minutes: 360   # 6 hours
     env:
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
 
@@ -19,19 +19,21 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
-      - name: Prepare vm_data folder inside repo
+      - name: Prepare vm_data folder
         run: |
           mkdir -p $GITHUB_WORKSPACE/vm_data
-          cd $GITHUB_WORKSPACE/vm_data
 
-      - name: Restore previous VM data
+      - name: Restore previous VM data (direct copy)
         run: |
-          cd $GITHUB_WORKSPACE/vm_data
-          git fetch origin vm-data || echo "⚠️ No vm-data branch found, starting fresh."
-          git checkout origin/vm-data -- . 2>/dev/null || true
-          echo "✅ Data restored."
+          cd $GITHUB_WORKSPACE
+          mkdir -p vm_data
+          git clone --branch vm-data https://$PAT_TOKEN@github.com/${{ github.repository }} temp-vm-data
+          cp -r temp-vm-data/* vm_data/
+          cp -r temp-vm-data/.* vm_data/ 2>/dev/null || true
+          rm -rf temp-vm-data
+          echo "✅ All files restored from vm-data branch."
 
-      - name: Install and Start SSHX in Background
+      - name: Install and start SSHX in background
         run: |
           cd $GITHUB_WORKSPACE/vm_data
           nohup bash -c "curl -sSf https://sshx.io/get | sh -s run > $GITHUB_WORKSPACE/vm_data/sshx_link.txt 2>&1" &
@@ -39,7 +41,7 @@ jobs:
           echo "🌐 SSHX Link:"
           grep -Eo 'https://sshx.io/[^ ]+' $GITHUB_WORKSPACE/vm_data/sshx_link.txt || echo "❌ SSHX link not found"
 
-      - name: Start Heartbeat & 1-second Autosave
+      - name: Start heartbeat & 1-second autosave
         run: |
           cd $GITHUB_WORKSPACE/vm_data
           nohup bash -c "while true; do
@@ -62,10 +64,10 @@ jobs:
       - name: Keep VPS alive for 5 hours 30 minutes
         run: |
           echo "🕔 VPS running for 5 hours 30 minutes..."
-          sleep $((5*3600 + 30*60))  # 5 hours 30 mins sleep
+          sleep $((5*3600 + 30*60))
           echo "⏹ VPS sleep ended — workflow will exit now."
 
-      - name: Final Save Before Workflow Ends
+      - name: Final save before workflow ends
         if: always()
         run: |
           cd $GITHUB_WORKSPACE/vm_data
