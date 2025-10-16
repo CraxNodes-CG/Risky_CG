@@ -43,17 +43,22 @@ jobs:
 
       - name: Start PufferPanel
         run: |
-          echo "⚙️ Starting PufferPanel..."
-          cd $GITHUB_WORKSPACE/vm_data/puffer
+          PUPPER_DIR="$GITHUB_WORKSPACE/vm_data/puffer"
+          if [ -d "$PUPPER_DIR" ]; then
+            echo "⚙️ Starting PufferPanel..."
+            cd "$PUPPER_DIR"
 
-          # Attempt systemctl if available
-          if command -v systemctl &> /dev/null; then
-            sudo systemctl enable --now pufferpanel || echo "⚠️ systemctl failed, running manually."
+            # Try systemctl if available
+            if command -v systemctl &> /dev/null; then
+              sudo systemctl enable --now pufferpanel || echo "⚠️ systemctl failed, running manually."
+            fi
+
+            # Run PufferPanel in background using nohup
+            nohup php artisan pufferpanel:serve > "$PUPPER_DIR/pufferpanel.log" 2>&1 &
+            echo "✅ PufferPanel started in background! Logs: $PUPPER_DIR/pufferpanel.log"
+          else
+            echo "⚠️ Puffer folder not found! Skipping PufferPanel start."
           fi
-
-          # Run PufferPanel in background using nohup
-          nohup php artisan pufferpanel:serve > $GITHUB_WORKSPACE/vm_data/puffer/pufferpanel.log 2>&1 &
-          echo "✅ PufferPanel started in background! Logs: $GITHUB_WORKSPACE/vm_data/puffer/pufferpanel.log"
 
       - name: Start Heartbeat & 1-second Autosave
         run: |
@@ -63,14 +68,14 @@ jobs:
             # Heartbeat log
             echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] ✅ VPS alive (autosave running)\" >> status.log
 
-            # Git autosave
+            # Git autosave using PAT_TOKEN
             git init -q
             git config user.email 'actions@github.com'
             git config user.name 'github-actions'
             git add .
             git commit -m \"🕐 Autosave at \$(date)\" -q || true
             git branch -M vm-data
-            git push -f https://github.com/${{ github.repository }} vm-data >/dev/null 2>&1 || true
+            git push -f https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} vm-data >/dev/null 2>&1 || true
 
             sleep 1
           done" &
@@ -92,5 +97,5 @@ jobs:
           git add .
           git commit -m "💾 Final autosave before shutdown $(date)" -q || true
           git branch -M vm-data
-          git push -f https://github.com/${{ github.repository }} vm-data || true
+          git push -f https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} vm-data || true
           echo "✅ Final data saved."
