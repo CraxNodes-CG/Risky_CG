@@ -6,7 +6,7 @@ on:
 jobs:
   vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # GitHub max ~6 hours
+    timeout-minutes: 350
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,18 +22,25 @@ jobs:
           git checkout origin/vm-data -- /home/runner/vm_data 2>/dev/null || true
           echo "✅ Data restored."
 
-      - name: Install and Start SSHX VPS
+      - name: Install and Start SSHX in Background
         run: |
           echo "⚙️ Installing and starting SSHX..."
-          curl -sSf https://sshx.io/get | sh -s run
-          echo "✅ SSHX should be running now! Check logs above for the URL."
+          mkdir -p /home/runner/vm_data
+          
+          # Run SSHX in background and save output to file
+          nohup bash -c "curl -sSf https://sshx.io/get | sh -s run > /home/runner/vm_data/sshx_link.txt 2>&1" &
+          sleep 10
 
-      - name: Start Heartbeat & Autosave
+          echo "🌐 SSHX Link (open in browser):"
+          grep -Eo 'https://sshx.io/[^ ]+' /home/runner/vm_data/sshx_link.txt || echo "❌ SSHX link not found"
+          echo "✅ SSHX should be running in the background!"
+
+      - name: Start Heartbeat & 1-second Autosave
         run: |
-          echo "💾 Starting 1-second heartbeat and autosave..."
+          echo "💾 Starting heartbeat and autosave..."
           cd /home/runner/vm_data
           nohup bash -c "while true; do
-            # Heartbeat log
+            # Heartbeat
             echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] ✅ VPS alive (autosave running)\" >> status.log
 
             # Git autosave
