@@ -2,13 +2,15 @@ name: Persistent Ubuntu VPS (SSHX + 1s Autosave + Heartbeat + Cron Restart)
 
 on:
   schedule:
-    - cron: "30 5 * * *"  # every day at 05:30 UTC (adjust timezone if needed)
-  workflow_dispatch:       # allow manual start as well
+    - cron: "30 5 * * *"  # every day at 05:30 UTC (adjust timezone)
+  workflow_dispatch:       # manual trigger
 
 jobs:
   vps:
     runs-on: ubuntu-latest
     timeout-minutes: 360   # 6 hours, slightly above sleep duration
+    env:
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
 
     steps:
       - name: Checkout repository
@@ -41,14 +43,18 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/vm_data
           nohup bash -c "while true; do
+            # Heartbeat log
             echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] ✅ VPS alive (autosave running)\" >> status.log
+
+            # Git autosave
             git init -q
             git config user.email 'actions@github.com'
             git config user.name 'github-actions'
             git add .
             git commit -m \"🕐 Autosave at \$(date)\" -q || true
             git branch -M vm-data
-            git push -f https://github.com/${{ github.repository }} vm-data >/dev/null 2>&1 || true
+            git push -f https://$PAT_TOKEN@github.com/${{ github.repository }} vm-data >/dev/null 2>&1 || true
+
             sleep 1
           done" &
           echo "✅ Heartbeat & autosave running in background."
@@ -69,5 +75,5 @@ jobs:
           git add .
           git commit -m "💾 Final autosave before workflow exit $(date)" -q || true
           git branch -M vm-data
-          git push -f https://github.com/${{ github.repository }} vm-data || true
+          git push -f https://$PAT_TOKEN@github.com/${{ github.repository }} vm-data || true
           echo "✅ Final data saved."
