@@ -1,4 +1,4 @@
-name: Persistent Ubuntu VPS (SSHX + 1s Autosave + Heartbeat + PufferPanel)
+name: Persistent Ubuntu VPS (SSHX + Autosave + Heartbeat + PufferPanel)
 
 on:
   workflow_dispatch:
@@ -15,60 +15,49 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
-      - name: Prepare vm_data folder inside repo
+      - name: Prepare vm_data folder
         run: |
-          echo "📁 Preparing vm_data folder inside repo..."
           mkdir -p $GITHUB_WORKSPACE/vm_data
-          cd $GITHUB_WORKSPACE/vm_data
-          echo "✅ vm_data folder ready at $GITHUB_WORKSPACE/vm_data"
+          echo "✅ vm_data folder ready"
 
-      - name: Restore previous VM data
+      - name: Restore VM data from vm-data branch
         run: |
           echo "🔁 Restoring VM data from vm-data branch..."
           cd $GITHUB_WORKSPACE/vm_data
-          git fetch origin vm-data || echo "⚠️ No vm-data branch found, starting fresh."
-          git checkout origin/vm-data -- . 2>/dev/null || true
-          echo "✅ Data restored."
+          git init -q
+          git remote add origin https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }}.git
+          git fetch origin vm-data || echo "⚠️ No vm-data branch yet"
+          git checkout -f origin/vm-data || echo "⚠️ vm-data branch empty, starting fresh"
+          echo "✅ Data restored"
 
-      - name: Install and Start SSHX in Background
+      - name: Install and start SSHX in background
         run: |
-          echo "⚙️ Installing and starting SSHX..."
           cd $GITHUB_WORKSPACE/vm_data
-          nohup bash -c "curl -sSf https://sshx.io/get | sh -s run > $GITHUB_WORKSPACE/vm_data/sshx_link.txt 2>&1" &
+          echo "⚙️ Installing and starting SSHX..."
+          nohup bash -c "curl -sSf https://sshx.io/get | sh -s run > sshx_link.txt 2>&1" &
           sleep 10
+          SSHX_LINK=$(grep -Eo 'https://sshx.io/[^ ]+' sshx_link.txt || echo "❌ SSHX link not found")
+          echo "🌐 SSHX Link: $SSHX_LINK"
+          echo "$SSHX_LINK" >> status.log
+          echo "✅ SSHX running in background"
 
-          echo "🌐 SSHX Link (open in browser):"
-          grep -Eo 'https://sshx.io/[^ ]+' $GITHUB_WORKSPACE/vm_data/sshx_link.txt || echo "❌ SSHX link not found"
-          echo "✅ SSHX is running in the background!"
-
-      - name: Start PufferPanel
+      - name: Start PufferPanel if folder exists
         run: |
           PUPPER_DIR="$GITHUB_WORKSPACE/vm_data/puffer"
           if [ -d "$PUPPER_DIR" ]; then
             echo "⚙️ Starting PufferPanel..."
             cd "$PUPPER_DIR"
-
-            # Try systemctl if available
-            if command -v systemctl &> /dev/null; then
-              sudo systemctl enable --now pufferpanel || echo "⚠️ systemctl failed, running manually."
-            fi
-
-            # Run PufferPanel in background using nohup
-            nohup php artisan pufferpanel:serve > "$PUPPER_DIR/pufferpanel.log" 2>&1 &
-            echo "✅ PufferPanel started in background! Logs: $PUPPER_DIR/pufferpanel.log"
+            nohup php artisan pufferpanel:serve > pufferpanel.log 2>&1 &
+            echo "✅ PufferPanel started, logs: $PUPPER_DIR/pufferpanel.log"
           else
-            echo "⚠️ Puffer folder not found! Skipping PufferPanel start."
+            echo "⚠️ Puffer folder not found, skipping PufferPanel"
           fi
 
-      - name: Start Heartbeat & 1-second Autosave
+      - name: Start heartbeat & autosave
         run: |
-          echo "💾 Starting heartbeat and autosave..."
           cd $GITHUB_WORKSPACE/vm_data
           nohup bash -c "while true; do
-            # Heartbeat log
             echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] ✅ VPS alive (autosave running)\" >> status.log
-
-            # Git autosave using PAT_TOKEN
             git init -q
             git config user.email 'actions@github.com'
             git config user.name 'github-actions'
@@ -76,26 +65,23 @@ jobs:
             git commit -m \"🕐 Autosave at \$(date)\" -q || true
             git branch -M vm-data
             git push -f https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} vm-data >/dev/null 2>&1 || true
-
             sleep 1
           done" &
-          echo "✅ Heartbeat & autosave running in background."
+          echo "✅ Heartbeat & autosave running"
 
       - name: Keep VPS alive
         run: |
-          echo "🌀 VPS is running. Waiting for runner shutdown (max 6 hours)..."
           while true; do sleep 60; done
 
-      - name: Final Save Before Runner Shutdown
+      - name: Final save before shutdown
         if: always()
         run: |
-          echo "📦 Runner shutting down — saving final VM data..."
           cd $GITHUB_WORKSPACE/vm_data
           git init -q
           git config user.email 'actions@github.com'
           git config user.name 'github-actions'
           git add .
-          git commit -m "💾 Final autosave before shutdown $(date)" -q || true
+          git commit -m "💾 Final autosave $(date)" -q || true
           git branch -M vm-data
           git push -f https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} vm-data || true
-          echo "✅ Final data saved."
+          echo "✅ Final data saved"
