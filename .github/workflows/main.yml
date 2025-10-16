@@ -53,14 +53,15 @@ jobs:
             echo "⚠️ Puffer folder not found, skipping PufferPanel"
           fi
 
-      - name: Start heartbeat & 1-second autosave
+      - name: Start heartbeat & 1-second autosave (background)
         run: |
           cd $GITHUB_WORKSPACE/vm_data
-          nohup bash -c "while true; do
+          nohup bash -c "
+          while true; do
             # Heartbeat log
             echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] ✅ VPS alive (autosave running)\" >> status.log
 
-            # Git autosave with branch handling
+            # Git autosave
             git init -q
             git config user.email 'actions@github.com'
             git config user.name 'github-actions'
@@ -78,8 +79,9 @@ jobs:
             git push -f https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} vm-data >/dev/null 2>&1 || true
 
             sleep 1
-          done" &
-          echo "✅ Heartbeat & autosave running"
+          done
+          " &
+          echo "✅ Heartbeat & autosave running in background"
 
       - name: Keep VPS alive
         run: |
